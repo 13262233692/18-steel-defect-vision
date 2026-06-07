@@ -1,0 +1,35 @@
+{
+    "camera": {
+        "camera_type": "basler",
+        "ip_address": "192.168.1.100",
+        "image_width": 8192,
+        "image_height": 1024,
+        "pixel_depth": 8,
+        "exposure_us": 500.0,
+        "line_rate_hz": 20000.0,
+        "trigger_mode": 1,
+        "buffer_count": 4
+    },
+    "trt": {
+        "onnx_path": "models/yolov8n_defect.onnx",
+        "engine_path": "models/yolov8n_defect.engine",
+        "gpu_id": 0,
+        "input_width": 640,
+        "input_height": 640,
+        "batch_size": 1,
+        "fp16": true,
+        "int8": false,
+        "calib_cache": "",
+        "max_workspace_mb": 2048,
+        "score_threshold": 0.25,
+        "nms_threshold": 0.45
+    },
+    "pipeline": {
+        "ring_buffer_size": 8,
+        "save_result_image": false,
+        "output_dir": "output/",
+        "warmup_iterations": 50,
+        "use_simulator": true,
+        "simulator_image_path": ""
+    }
+}
