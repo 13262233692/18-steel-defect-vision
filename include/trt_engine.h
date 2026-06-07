@@ -24,13 +24,12 @@ public:
     ~TrtEngine();
 
     bool BuildOrLoadEngine();
-    bool Infer();
+    bool Infer(cudaStream_t stream);
 
     const float* OutputGpuPtr() const { return output_gpu_; }
     float* InputGpuPtr() const { return input_gpu_; }
     int OutputSize() const { return output_size_; }
     int OutputShape(int dim) const;
-    cudaStream_t Stream() const { return stream_; }
 
 private:
     bool BuildEngineFromOnnx();
@@ -51,7 +50,6 @@ private:
     int output_size_ = 0;
     int input_index_ = -1;
     int output_index_ = -1;
-    cudaStream_t stream_ = nullptr;
 };
 
 }

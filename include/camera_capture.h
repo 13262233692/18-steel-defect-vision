@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <cuda_runtime.h>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -22,6 +23,8 @@ struct FrameMeta {
 
 struct Frame {
     uint8_t* gpu_data = nullptr;
+    uint8_t* host_pinned = nullptr;
+    cudaEvent_t h2d_done = nullptr;
     FrameMeta meta;
 };
 
@@ -36,10 +39,13 @@ public:
     void ReleaseReadSlot(Frame* frame);
 
     int Capacity() const { return capacity_; }
+    int Width() const { return width_; }
+    int Height() const { return height_; }
 
 private:
     int capacity_;
-    int slot_size_;
+    int width_;
+    int height_;
     std::vector<Frame> frames_;
     std::vector<std::atomic<int>> slot_state_;
     int write_idx_ = 0;
@@ -60,6 +66,7 @@ public:
     bool Start();
     void Stop();
     bool IsRunning() const { return running_.load(); }
+    cudaStream_t H2DStream() const { return h2d_stream_; }
 
 private:
     void CaptureThread();
@@ -68,18 +75,17 @@ private:
     void CloseBasler();
     void CloseHikvision();
     void SimulateThread();
+    void AsyncCopyFrame(Frame* frame, const uint8_t* src, size_t size);
 
     CameraConfig config_;
     RingBuffer* ring_;
     std::atomic<bool> running_{false};
     std::thread thread_;
 
+    cudaStream_t h2d_stream_ = nullptr;
+
     void* basler_camera_ = nullptr;
     void* hikvision_handle_ = nullptr;
 };
-
-cudaError_t AllocPinnedFrameBuffer(int width, int height, uint8_t** gpu_ptr);
-cudaError_t FreePinnedFrameBuffer(uint8_t* gpu_ptr);
-cudaError_t CopyHostToGpuPinned(uint8_t* dst_gpu, const uint8_t* src_host, size_t size);
 
 }

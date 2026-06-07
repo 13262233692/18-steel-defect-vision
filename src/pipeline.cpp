@@ -19,6 +19,12 @@ Pipeline::Pipeline(const PipelineConfig& cfg) : config_(cfg) {}
 
 Pipeline::~Pipeline() {
     Stop();
+
+    if (preprocess_done_) cudaEventDestroy(preprocess_done_);
+    if (infer_done_) cudaEventDestroy(infer_done_);
+    if (preprocess_stream_) cudaStreamDestroy(preprocess_stream_);
+    if (infer_stream_) cudaStreamDestroy(infer_stream_);
+    if (postprocess_stream_) cudaStreamDestroy(postprocess_stream_);
 }
 
 bool Pipeline::Init() {
@@ -35,7 +41,35 @@ bool Pipeline::Init() {
         return false;
     }
 
-    std::cout << "[Pipeline] Init complete\n";
+    cudaError_t err;
+    err = cudaStreamCreateWithFlags(&preprocess_stream_, cudaStreamNonBlocking);
+    if (err != cudaSuccess) {
+        std::cerr << "[Pipeline] Failed to create preprocess stream\n";
+        return false;
+    }
+    err = cudaStreamCreateWithFlags(&infer_stream_, cudaStreamNonBlocking);
+    if (err != cudaSuccess) {
+        std::cerr << "[Pipeline] Failed to create infer stream\n";
+        return false;
+    }
+    err = cudaStreamCreateWithFlags(&postprocess_stream_, cudaStreamNonBlocking);
+    if (err != cudaSuccess) {
+        std::cerr << "[Pipeline] Failed to create postprocess stream\n";
+        return false;
+    }
+
+    err = cudaEventCreateWithFlags(&preprocess_done_, cudaEventDisableTiming);
+    if (err != cudaSuccess) {
+        std::cerr << "[Pipeline] Failed to create preprocess_done event\n";
+        return false;
+    }
+    err = cudaEventCreateWithFlags(&infer_done_, cudaEventDisableTiming);
+    if (err != cudaSuccess) {
+        std::cerr << "[Pipeline] Failed to create infer_done event\n";
+        return false;
+    }
+
+    std::cout << "[Pipeline] Init complete (3 non-blocking streams + 2 sync events)\n";
     return true;
 }
 
@@ -115,22 +149,32 @@ void Pipeline::InferenceLoop() {
         params.orig_w = orig_w;
         params.orig_h = orig_h;
 
+        cudaStreamWaitEvent(preprocess_stream_, frame->h2d_done, 0);
+
         CudaPreprocessResize(
             frame->gpu_data, orig_w, orig_h,
             engine_->InputGpuPtr(),
             config_.trt.input_width, config_.trt.input_height,
-            engine_->Stream());
+            preprocess_stream_);
+
+        cudaEventRecord(preprocess_done_, preprocess_stream_);
 
         auto t_pre = std::chrono::high_resolution_clock::now();
         double ms_pre = std::chrono::duration<double, std::milli>(t_pre - t_cap).count();
 
-        if (!engine_->Infer()) {
+        cudaStreamWaitEvent(infer_stream_, preprocess_done_, 0);
+
+        if (!engine_->Infer(infer_stream_)) {
             ring_->ReleaseReadSlot(frame);
             continue;
         }
 
+        cudaEventRecord(infer_done_, infer_stream_);
+
         auto t_infer = std::chrono::high_resolution_clock::now();
         double ms_infer = std::chrono::duration<double, std::milli>(t_infer - t_pre).count();
+
+        cudaStreamWaitEvent(postprocess_stream_, infer_done_, 0);
 
         int num_rows = engine_->OutputShape(1);
         int num_classes = engine_->OutputShape(2) - 4;
@@ -142,7 +186,9 @@ void Pipeline::InferenceLoop() {
             num_rows, num_classes,
             config_.trt.score_threshold,
             config_.trt.nms_threshold,
-            params, 0);
+            params, postprocess_stream_);
+
+        cudaStreamSynchronize(postprocess_stream_);
 
         auto t_post = std::chrono::high_resolution_clock::now();
         double ms_post = std::chrono::duration<double, std::milli>(t_post - t_infer).count();
@@ -172,8 +218,9 @@ void Pipeline::InferenceLoop() {
 
         if (config_.save_result_image && !dets.empty()) {
             cv::Mat img(orig_h, orig_w, CV_8UC1);
-            cudaMemcpy(img.data, frame->gpu_data,
-                orig_w * orig_h, cudaMemcpyDeviceToHost);
+            cudaMemcpyAsync(img.data, frame->gpu_data,
+                orig_w * orig_h, cudaMemcpyDeviceToHost, postprocess_stream_);
+            cudaStreamSynchronize(postprocess_stream_);
             cv::Mat color;
             cv::cvtColor(img, color, cv::COLOR_GRAY2BGR);
             DrawDetections(color, dets, class_names);

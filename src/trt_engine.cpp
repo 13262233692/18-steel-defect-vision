@@ -36,7 +36,6 @@ TrtEngine::~TrtEngine() {
     }
     if (input_gpu_) cudaFree(input_gpu_);
     if (output_gpu_) cudaFree(output_gpu_);
-    if (stream_) cudaStreamDestroy(stream_);
 }
 
 bool TrtEngine::BuildOrLoadEngine() {
@@ -208,7 +207,7 @@ bool TrtEngine::DeserializeEngine(const std::string& path) {
     return true;
 }
 
-bool TrtEngine::Infer() {
+bool TrtEngine::Infer(cudaStream_t stream) {
     if (!context_) return false;
 
     if (!input_gpu_) {
@@ -235,7 +234,6 @@ bool TrtEngine::Infer() {
 
         cudaMalloc(&input_gpu_, input_size_ * sizeof(float));
         cudaMalloc(&output_gpu_, output_size_ * sizeof(float));
-        cudaStreamCreate(&stream_);
 
         bindings_[input_index_] = input_gpu_;
         bindings_[output_index_] = output_gpu_;
@@ -244,8 +242,7 @@ bool TrtEngine::Infer() {
                   << " output=" << output_size_ << "\n";
     }
 
-    context_->enqueueV2(bindings_, stream_, nullptr);
-    cudaStreamSynchronize(stream_);
+    context_->enqueueV2(bindings_, stream, nullptr);
 
     return true;
 }

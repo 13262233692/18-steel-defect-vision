@@ -17,11 +17,12 @@
 namespace steel {
 
 RingBuffer::RingBuffer(int capacity, int width, int height)
-    : capacity_(capacity), slot_size_(width * height) {
+    : capacity_(capacity), width_(width), height_(height) {
     frames_.resize(capacity);
     slot_state_.resize(capacity);
     for (int i = 0; i < capacity; ++i) {
-        AllocPinnedFrameBuffer(width, height, &frames_[i].gpu_data);
+        AllocPinnedFrameBuffer(width, height,
+            &frames_[i].gpu_data, &frames_[i].host_pinned, &frames_[i].h2d_done);
         frames_[i].meta.width = width;
         frames_[i].meta.height = height;
         frames_[i].meta.valid = false;
@@ -31,9 +32,7 @@ RingBuffer::RingBuffer(int capacity, int width, int height)
 
 RingBuffer::~RingBuffer() {
     for (auto& f : frames_) {
-        if (f.gpu_data) {
-            FreePinnedFrameBuffer(f.gpu_data);
-        }
+        FreePinnedFrameBuffer(f.gpu_data, f.host_pinned, f.h2d_done);
     }
 }
 
@@ -76,10 +75,21 @@ CameraCapture::CameraCapture(const CameraConfig& cfg, RingBuffer* ring)
 
 CameraCapture::~CameraCapture() {
     Stop();
+    if (h2d_stream_) {
+        cudaStreamDestroy(h2d_stream_);
+        h2d_stream_ = nullptr;
+    }
 }
 
 bool CameraCapture::Start() {
     if (running_.load()) return true;
+
+    cudaError_t err = cudaStreamCreateWithFlags(&h2d_stream_, cudaStreamNonBlocking);
+    if (err != cudaSuccess) {
+        std::cerr << "[CameraCapture] Failed to create non-blocking H2D stream\n";
+        return false;
+    }
+
     running_.store(true);
 
     bool use_sim = true;
@@ -107,6 +117,16 @@ void CameraCapture::Stop() {
 
     if (thread_.joinable()) {
         thread_.join();
+    }
+}
+
+void CameraCapture::AsyncCopyFrame(Frame* frame, const uint8_t* src, size_t size) {
+    if (frame->host_pinned) {
+        memcpy(frame->host_pinned, src, size);
+        AsyncCopyH2D(frame->gpu_data, frame->host_pinned, size, h2d_stream_, frame->h2d_done);
+    } else {
+        cudaMemcpyAsync(frame->gpu_data, src, size, cudaMemcpyHostToDevice, h2d_stream_);
+        cudaEventRecord(frame->h2d_done, h2d_stream_);
     }
 }
 
@@ -232,7 +252,8 @@ void CameraCapture::CaptureThread() {
             Frame* frame = ring_->AcquireWriteSlot();
             const uint8_t* host_ptr = static_cast<const uint8_t*>(grab_result->GetBuffer());
             size_t sz = grab_result->GetWidth() * grab_result->GetHeight();
-            CopyHostToGpuPinned(frame->gpu_data, host_ptr, sz);
+
+            AsyncCopyFrame(frame, host_ptr, sz);
 
             frame->meta.frame_id = frame_id++;
             frame->meta.timestamp_ns = std::chrono::high_resolution_clock::now()
@@ -262,7 +283,7 @@ void CameraCapture::CaptureThread() {
             if (ret != MV_OK) continue;
 
             Frame* frame = ring_->AcquireWriteSlot();
-            CopyHostToGpuPinned(frame->gpu_data, host_buf.data(), payload);
+            AsyncCopyFrame(frame, host_buf.data(), payload);
 
             frame->meta.frame_id = frame_id++;
             frame->meta.timestamp_ns = std::chrono::high_resolution_clock::now()
@@ -284,7 +305,6 @@ void CameraCapture::SimulateThread() {
     std::cout << "[CameraCapture] Running in SIMULATOR mode\n";
     uint64_t frame_id = 0;
     int img_size = config_.image_width * config_.image_height;
-    std::vector<uint8_t> sim_buf(img_size, 128);
 
     std::mt19937 rng(42);
     std::uniform_int_distribution<int> defect_dist(0, 99);
@@ -293,6 +313,12 @@ void CameraCapture::SimulateThread() {
     while (running_.load()) {
         Frame* frame = ring_->AcquireWriteSlot();
 
+        uint8_t* write_buf = frame->host_pinned;
+        if (!write_buf) {
+            ring_->ReleaseWriteSlot(frame);
+            continue;
+        }
+
         if (defect_dist(rng) < 10) {
             int x = rng() % (config_.image_width - 200);
             int y = rng() % (config_.image_height - 80);
@@ -300,12 +326,15 @@ void CameraCapture::SimulateThread() {
             int h = 20 + rng() % 60;
             for (int row = y; row < y + h && row < config_.image_height; ++row) {
                 for (int col = x; col < x + w && col < config_.image_width; ++col) {
-                    sim_buf[row * config_.image_width + col] = pixel_dist(rng);
+                    write_buf[row * config_.image_width + col] = pixel_dist(rng);
                 }
             }
+        } else {
+            memset(write_buf, 128, img_size);
         }
 
-        CopyHostToGpuPinned(frame->gpu_data, sim_buf.data(), img_size);
+        AsyncCopyH2D(frame->gpu_data, frame->host_pinned, img_size,
+                     h2d_stream_, frame->h2d_done);
 
         frame->meta.frame_id = frame_id++;
         frame->meta.timestamp_ns = std::chrono::high_resolution_clock::now()

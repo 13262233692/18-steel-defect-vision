@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cuda_runtime.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,18 +39,23 @@ public:
 
 private:
     void InferenceLoop();
-    void OnFrameArrived(class Frame* frame);
 
     PipelineConfig config_;
     std::unique_ptr<RingBuffer> ring_;
     std::unique_ptr<CameraCapture> capture_;
     std::unique_ptr<TrtEngine> engine_;
 
+    cudaStream_t preprocess_stream_ = nullptr;
+    cudaStream_t infer_stream_ = nullptr;
+    cudaStream_t postprocess_stream_ = nullptr;
+
+    cudaEvent_t preprocess_done_ = nullptr;
+    cudaEvent_t infer_done_ = nullptr;
+
     std::atomic<bool> running_{false};
     std::thread infer_thread_;
 
     PipelineStats stats_;
-    std::chrono::time_point<std::chrono::high_resolution_clock> frame_start_;
 };
 
 }
