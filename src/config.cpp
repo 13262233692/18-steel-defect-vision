@@ -59,6 +59,22 @@ PipelineConfig LoadConfig(const std::string& json_path) {
             if (p.contains("simulator_image_path")) cfg.simulator_image_path = p["simulator_image_path"].get<std::string>();
         }
 
+        if (j.contains("tracker")) {
+            auto& tk = j["tracker"];
+            if (tk.contains("overlap_rows")) cfg.tracker.overlap_rows = tk["overlap_rows"].get<int>();
+            if (tk.contains("max_corners")) cfg.tracker.max_corners = tk["max_corners"].get<int>();
+            if (tk.contains("corner_quality")) cfg.tracker.corner_quality = tk["corner_quality"].get<float>();
+            if (tk.contains("corner_min_distance")) cfg.tracker.corner_min_distance = tk["corner_min_distance"].get<float>();
+            if (tk.contains("lk_win_size")) cfg.tracker.lk_win_size = tk["lk_win_size"].get<int>();
+            if (tk.contains("lk_max_level")) cfg.tracker.lk_max_level = tk["lk_max_level"].get<int>();
+            if (tk.contains("lk_epsilon")) cfg.tracker.lk_epsilon = tk["lk_epsilon"].get<float>();
+            if (tk.contains("lk_max_iter")) cfg.tracker.lk_max_iter = tk["lk_max_iter"].get<int>();
+            if (tk.contains("flow_dy_threshold")) cfg.tracker.flow_dy_threshold = tk["flow_dy_threshold"].get<float>();
+            if (tk.contains("iou_threshold")) cfg.tracker.iou_threshold = tk["iou_threshold"].get<float>();
+            if (tk.contains("vertical_alignment_tol")) cfg.tracker.vertical_alignment_tol = tk["vertical_alignment_tol"].get<float>();
+            if (tk.contains("max_missing_frames")) cfg.tracker.max_missing_frames = tk["max_missing_frames"].get<int>();
+        }
+
     } catch (const nlohmann::json::exception& e) {
         std::cerr << "[Config] JSON parse error: " << e.what() << "\n";
     }

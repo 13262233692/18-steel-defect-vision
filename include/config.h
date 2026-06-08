@@ -33,9 +33,25 @@ struct TritConfig {
     float nms_threshold = 0.45f;
 };
 
+struct TrackerConfig {
+    int overlap_rows = 128;
+    int max_corners = 64;
+    float corner_quality = 0.01f;
+    float corner_min_distance = 10.f;
+    int lk_win_size = 21;
+    int lk_max_level = 3;
+    float lk_epsilon = 0.03f;
+    int lk_max_iter = 30;
+    float flow_dy_threshold = 5.f;
+    float iou_threshold = 0.15f;
+    float vertical_alignment_tol = 30.f;
+    int max_missing_frames = 3;
+};
+
 struct PipelineConfig {
     CameraConfig camera;
     TritConfig trt;
+    TrackerConfig tracker;
     int ring_buffer_size = 8;
     bool save_result_image = false;
     std::string output_dir = "output/";

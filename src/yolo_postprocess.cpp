@@ -30,6 +30,10 @@ void DrawDetections(
             label = "cls" + std::to_string(d.class_id);
         }
 
+        if (d.track_id >= 0) {
+            label = "#" + std::to_string(d.track_id) + " " + label;
+        }
+
         char conf_buf[16];
         snprintf(conf_buf, sizeof(conf_buf), " %.1f%%", d.confidence * 100.f);
         label += conf_buf;

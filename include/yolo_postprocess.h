@@ -17,6 +17,7 @@ struct Detection {
     float x1, y1, x2, y2;
     float confidence;
     int class_id;
+    int track_id = -1;
 };
 
 struct PreprocessParams {

@@ -31,5 +31,19 @@
         "warmup_iterations": 50,
         "use_simulator": true,
         "simulator_image_path": ""
+    },
+    "tracker": {
+        "overlap_rows": 128,
+        "max_corners": 64,
+        "corner_quality": 0.01,
+        "corner_min_distance": 10.0,
+        "lk_win_size": 21,
+        "lk_max_level": 3,
+        "lk_epsilon": 0.03,
+        "lk_max_iter": 30,
+        "flow_dy_threshold": 5.0,
+        "iou_threshold": 0.15,
+        "vertical_alignment_tol": 30.0,
+        "max_missing_frames": 3
     }
 }
